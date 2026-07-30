@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/zclconf/go-cty/cty"
 )
 
 var _ Config = &DummyConfig{}
@@ -312,6 +313,41 @@ func (s *configSuite) TestForEach_forEachAsToggle() {
 	config, err := BuildDummyConfig("", "", nil, nil)
 	require.NoError(s.T(), err)
 	s.Len(Blocks[TestData](config), 0)
+}
+
+func (s *configSuite) TestForEach_EmptyCollectionShouldRegisterNamespace() {
+	hclConfig := `
+data "dummy" "sibling" {}
+
+data "dummy" "empty" {
+	for_each = []
+}
+
+resource "dummy" "downstream" {
+	for_each = data.dummy.empty
+}
+`
+	s.dummyFsWithFiles(map[string]string{
+		"test.hcl": hclConfig,
+	})
+
+	config, err := BuildDummyConfig("", "", nil, nil)
+	require.NoError(s.T(), err)
+	_, err = RunDummyPlan(config)
+	require.NoError(s.T(), err)
+
+	s.Len(Blocks[TestData](config), 1)
+	s.Empty(Blocks[TestResource](config))
+	for _, reference := range []string{
+		"data.dummy.empty",
+		"resource.dummy.downstream",
+	} {
+		expr, diag := hclsyntax.ParseExpression([]byte(reference), "", hcl.InitialPos)
+		require.False(s.T(), diag.HasErrors())
+		value, diag := expr.Value(config.EvalContext())
+		require.False(s.T(), diag.HasErrors(), diag.Error())
+		s.True(value.RawEquals(cty.EmptyObjectVal))
+	}
 }
 
 func (s *configSuite) TestForEach_blocksWithIndexShouldHasNewBlockId() {

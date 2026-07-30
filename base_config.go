@@ -38,7 +38,9 @@ type BaseConfig struct {
 	inputVariables           map[string]VariableValueRead
 	inputVariableReadsLoader *sync.Once
 	ignoreUnknownVariables   bool
-	OverrideFunctions        map[string]function.Function
+	// Empty expansions leave the DAG but still need an addressable evaluation namespace.
+	emptyForEachBlocks map[string]Block
+	OverrideFunctions  map[string]function.Function
 }
 
 func (c *BaseConfig) Context() context.Context {
@@ -57,8 +59,16 @@ func (c *BaseConfig) EmptyEvalContext() *hcl.EvalContext {
 
 func (c *BaseConfig) EvalContext() *hcl.EvalContext {
 	ctx := c.EmptyEvalContext()
-	for bt, bs := range c.blocksByTypes() {
-		sample := bs[0]
+	blocksByTypes := c.blocksByTypes()
+	emptyForEachBlocksByTypes := c.emptyForEachBlocksByTypes()
+	for bt := range emptyForEachBlocksByTypes {
+		if _, ok := blocksByTypes[bt]; !ok {
+			blocksByTypes[bt] = nil
+		}
+	}
+	for bt, bs := range blocksByTypes {
+		emptyForEachBlocks := emptyForEachBlocksByTypes[bt]
+		sample := firstBlock(bs, emptyForEachBlocks)
 		if s, ok := sample.(BlockCustomizedRefType); ok {
 			bt = s.CustomizedRefType()
 		}
@@ -66,7 +76,7 @@ func (c *BaseConfig) EvalContext() *hcl.EvalContext {
 			ctx.Variables[bt] = SingleValues(castBlock[SingleValueBlock](bs))
 			continue
 		}
-		ctx.Variables[bt] = Values(bs)
+		ctx.Variables[bt] = valuesWithEmptyForEach(bs, emptyForEachBlocks)
 	}
 	return ctx
 }
@@ -91,6 +101,7 @@ func NewBasicConfig(basedir, dslFullName, dslAbbreviation string, varConfigDir *
 		d:                        newDag(),
 		inputVariableReadsLoader: &sync.Once{},
 		rawBlockAddresses:        make(map[string]struct{}),
+		emptyForEachBlocks:       make(map[string]Block),
 	}
 	return c
 }
@@ -271,6 +282,24 @@ func (c *BaseConfig) blocksByTypes() map[string][]Block {
 	return r
 }
 
+func (c *BaseConfig) emptyForEachBlocksByTypes() map[string][]Block {
+	r := make(map[string][]Block)
+	for _, b := range c.emptyForEachBlocks {
+		bt := b.BlockType()
+		r[bt] = append(r[bt], b)
+	}
+	return r
+}
+
+func firstBlock(groups ...[]Block) Block {
+	for _, group := range groups {
+		if len(group) > 0 {
+			return group[0]
+		}
+	}
+	return nil
+}
+
 func (c *BaseConfig) buildDag(blocks []Block) error {
 	for _, b := range blocks {
 		c.rawBlockAddresses[b.Address()] = struct{}{}
@@ -334,7 +363,16 @@ func (c *BaseConfig) expandBlock(b Block) ([]Block, error) {
 		}
 	}
 	b.markExpanded()
-	return expandedBlocks, c.d.DeleteVertex(address)
+	if err := c.d.DeleteVertex(address); err != nil {
+		return expandedBlocks, err
+	}
+	if len(expandedBlocks) == 0 {
+		if c.emptyForEachBlocks == nil {
+			c.emptyForEachBlocks = make(map[string]Block)
+		}
+		c.emptyForEachBlocks[address] = b
+	}
+	return expandedBlocks, nil
 }
 
 func Traverse[T Block](c *BaseConfig, walker func(b T) error) error {
