@@ -163,11 +163,24 @@ func SingleValues(blocks []SingleValueBlock) cty.Value {
 }
 
 func Values[T Block](blocks []T) cty.Value {
-	if len(blocks) == 0 {
+	return valuesWithEmptyForEach(blocks, nil)
+}
+
+func valuesWithEmptyForEach[T Block](blocks []T, emptyForEachBlocks []Block) cty.Value {
+	if len(blocks) == 0 && len(emptyForEachBlocks) == 0 {
 		return cty.EmptyObjectVal
 	}
 	res := map[string]cty.Value{}
 	valuesMap := map[string]map[string]cty.Value{}
+
+	for _, b := range emptyForEachBlocks {
+		values, exists := valuesMap[b.Type()]
+		if !exists {
+			values = map[string]cty.Value{}
+		}
+		values[b.Name()] = cty.EmptyObjectVal
+		valuesMap[b.Type()] = values
+	}
 
 	for _, b := range blocks {
 		values, exists := valuesMap[b.Type()]

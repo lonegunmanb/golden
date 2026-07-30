@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/zclconf/go-cty/cty"
 )
 
 var _ Config = &DummyConfig{}
@@ -202,6 +203,95 @@ func (s *configSuite) TestInvalidBlockType() {
 	assert.Contains(t, err.Error(), expectedError)
 }
 
+func TestRegisteredBlockLabelValidation(t *testing.T) {
+	tests := []struct {
+		name            string
+		config          string
+		expectedSummary string
+		expectedDetail  string
+		expectedSyntax  string
+	}{
+		{
+			name: "variable missing name",
+			config: `variable {
+  default = "hello"
+}`,
+			expectedSummary: "Missing variable block name",
+			expectedDetail:  `The "variable" block requires a name label`,
+			expectedSyntax:  `variable "NAME" {`,
+		},
+		{
+			name: "variable with extra label",
+			config: `variable "environment" "unexpected" {
+  default = "prod"
+}`,
+			expectedSummary: "Extraneous label for variable block",
+			expectedDetail:  `Remove the extra "unexpected" label`,
+			expectedSyntax:  `variable "NAME" {`,
+		},
+		{
+			name:            "typed block missing name",
+			config:          `data "dummy" {}`,
+			expectedSummary: "Missing data block name",
+			expectedDetail:  `The data "dummy" block requires a name label`,
+			expectedSyntax:  `data "dummy" "NAME" {`,
+		},
+		{
+			name:            "typed block with extra label",
+			config:          `data "dummy" "sample" "unexpected" {}`,
+			expectedSummary: "Extraneous label for data block",
+			expectedDetail:  `Remove the extra "unexpected" label`,
+			expectedSyntax:  `data "dummy" "NAME" {`,
+		},
+		{
+			name:            "root block missing name",
+			config:          `dummy_root {}`,
+			expectedSummary: "Missing dummy_root block name",
+			expectedDetail:  `The "dummy_root" block requires a name label`,
+			expectedSyntax:  `dummy_root "NAME" {`,
+		},
+		{
+			name:            "root block with extra label",
+			config:          `dummy_root "sample" "unexpected" {}`,
+			expectedSummary: "Extraneous label for dummy_root block",
+			expectedDetail:  `Remove the extra "unexpected" label`,
+			expectedSyntax:  `dummy_root "NAME" {`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testBase := newTestBase()
+			defer testBase.teardown()
+			testBase.dummyFsWithFiles(map[string]string{"test.hcl": test.config})
+
+			var err error
+			require.NotPanics(t, func() {
+				_, err = BuildDummyConfig("", "", nil, nil)
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.expectedSummary)
+			assert.Contains(t, err.Error(), test.expectedDetail)
+			assert.Contains(t, err.Error(), test.expectedSyntax)
+			assert.Contains(t, err.Error(), "test.hcl:1")
+		})
+	}
+}
+
+func TestNewBaseBlockWithoutNameIsBoundsSafe(t *testing.T) {
+	hclBlock := &HclBlock{Block: &hclsyntax.Block{
+		Type:   "variable",
+		Labels: []string{""},
+	}}
+
+	var block *BaseBlock
+	require.NotPanics(t, func() {
+		block = NewBaseBlock(nil, hclBlock)
+	})
+	require.NotNil(t, block)
+	assert.Empty(t, block.Name())
+}
+
 func (s *configSuite) TestFunctionInEvalContext() {
 	t := s.T()
 	configStr := `
@@ -245,7 +335,7 @@ locals {
 func (s *configSuite) TestForEach_ForEachBlockShouldBeExpanded() {
 	hclConfig := `
 	locals {
-		items = ["item1", "item2", "item3"]
+		items = toset(["item1", "item2", "item3"])
 	}
 
 	data "dummy" "foo" {
@@ -302,7 +392,7 @@ func (s *configSuite) TestForEach_forEachAsToggle() {
     }
 
     data "dummy" sample {
-        for_each = false ? locals.items : []
+        for_each = false ? local.items : toset([])
     }
     `
 	s.dummyFsWithFiles(map[string]string{
@@ -312,6 +402,41 @@ func (s *configSuite) TestForEach_forEachAsToggle() {
 	config, err := BuildDummyConfig("", "", nil, nil)
 	require.NoError(s.T(), err)
 	s.Len(Blocks[TestData](config), 0)
+}
+
+func (s *configSuite) TestForEach_EmptyCollectionShouldRegisterNamespace() {
+	hclConfig := `
+data "dummy" "sibling" {}
+
+data "dummy" "empty" {
+	for_each = {}
+}
+
+resource "dummy" "downstream" {
+	for_each = data.dummy.empty
+}
+`
+	s.dummyFsWithFiles(map[string]string{
+		"test.hcl": hclConfig,
+	})
+
+	config, err := BuildDummyConfig("", "", nil, nil)
+	require.NoError(s.T(), err)
+	_, err = RunDummyPlan(config)
+	require.NoError(s.T(), err)
+
+	s.Len(Blocks[TestData](config), 1)
+	s.Empty(Blocks[TestResource](config))
+	for _, reference := range []string{
+		"data.dummy.empty",
+		"resource.dummy.downstream",
+	} {
+		expr, diag := hclsyntax.ParseExpression([]byte(reference), "", hcl.InitialPos)
+		require.False(s.T(), diag.HasErrors())
+		value, diag := expr.Value(config.EvalContext())
+		require.False(s.T(), diag.HasErrors(), diag.Error())
+		s.True(value.RawEquals(cty.EmptyObjectVal))
+	}
 }
 
 func (s *configSuite) TestForEach_blocksWithIndexShouldHasNewBlockId() {
@@ -376,20 +501,20 @@ func (s *configSuite) TestExpandableApplyBlockWithZeroLengthShouldNotBlockDownst
     }
 
 	resource "dummy" foobar {
-	    for_each = []
+	    for_each = {}
 		tags = {
 		  foo = local.foo
 		}
 	}
 
 	resource "dummy" bar {
-        for_each = []
+        for_each = {}
 		tags = {}
 		depends_on = [resource.dummy.foobar]
 	}
 
     resource "dummy" foo {
-        for_each = []
+        for_each = {}
 		tags = {}
         depends_on = [resource.dummy.bar]
 	}
