@@ -1,4 +1,4 @@
-module github.com/Azure/golden
+module github.com/lonegunmanb/golden
 
 go 1.25.0
 

@@ -28,11 +28,11 @@ jobs:
         with:
           languages: go
       - name: Run build
-        run: go build github.com/Azure/golden
+        run: go build github.com/lonegunmanb/golden
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@28deaeda66b76a05916b6923827895f2b14ab387 #v3.28.16
       - name: Run tests
-        run: go test -v github.com/Azure/golden/...
+        run: go test -v github.com/lonegunmanb/golden/...
       - name: Run Gosec Security Scanner
         uses: securego/gosec@955a68d0d19f4afb7503068f95059f7d0c529017 #v2.22.3
       - name: golangci-lint

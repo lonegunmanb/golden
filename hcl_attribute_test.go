@@ -1,7 +1,7 @@
 package golden_test
 
 import (
-	"github.com/Azure/golden"
+	"github.com/lonegunmanb/golden"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
