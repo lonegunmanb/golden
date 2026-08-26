@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zclconf/go-cty/cty"
 )
 
 type parallelTestConfig struct {
@@ -65,6 +66,47 @@ func waitForParallelCallbacks(t *testing.T, started <-chan string, count int) {
 	}
 }
 
+type trackingPrePlanBlock struct {
+	*BaseBlock
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (b *trackingPrePlanBlock) Type() string {
+	return "tracking"
+}
+
+func (b *trackingPrePlanBlock) BlockType() string {
+	return "tracking"
+}
+
+func (b *trackingPrePlanBlock) AddressLength() int {
+	return 1
+}
+
+func (b *trackingPrePlanBlock) CanExecutePrePlan() bool {
+	return true
+}
+
+func (b *trackingPrePlanBlock) ExecuteBeforePlan() error {
+	b.started <- b.Address()
+	<-b.release
+	return nil
+}
+
+func newTrackingPrePlanBlock(address string, started chan<- string, release <-chan struct{}) *trackingPrePlanBlock {
+	return &trackingPrePlanBlock{
+		BaseBlock: &BaseBlock{
+			blockAddress: address,
+			hb: &HclBlock{Block: &hclsyntax.Block{
+				Body: &hclsyntax.Body{Attributes: hclsyntax.Attributes{}},
+			}},
+		},
+		started: started,
+		release: release,
+	}
+}
+
 func TestInitConfigCachesParallelism(t *testing.T) {
 	c := &parallelTestConfig{
 		BaseConfig:  NewBasicConfig("", "test", "test", nil, nil, nil),
@@ -87,6 +129,84 @@ func TestInitConfigLeavesParallelismUnsetWhenUnsupported(t *testing.T) {
 
 	require.NoError(t, InitConfig(c, nil))
 	assert.Nil(t, c.parallelism)
+}
+
+func TestRunPrePlanOnParallelConfigRemainsSerial(t *testing.T) {
+	d := newDag()
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	for _, address := range []string{"var.first", "var.second"} {
+		block := newTrackingPrePlanBlock(address, started, release)
+		require.NoError(t, d.AddVertexByID(address, block))
+	}
+
+	c := newParallelTestConfig(d, 2)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.RunPrePlan()
+	}()
+
+	waitForParallelCallbacks(t, started, 1)
+	select {
+	case address := <-started:
+		t.Fatalf("pre-plan callback %s ran concurrently", address)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	require.NoError(t, <-done)
+	assert.Len(t, started, 1)
+}
+
+func TestInitConfigWithParallelismSupportsCliObjectVariables(t *testing.T) {
+	testBase := newTestBase()
+	defer testBase.teardown()
+	testBase.dummyFsWithFiles(map[string]string{
+		"test.hcl": `
+variable "target" {
+  type    = string
+  default = "hello"
+}
+
+variable "audience" {
+  type    = string
+  default = "world"
+}
+
+variable "model_provider" {
+  type = object({
+    api_key_ref = string
+    region      = optional(string, "us-east-1")
+  })
+}
+`,
+	})
+
+	for range 20 {
+		hclBlocks, err := loadHclBlocks(false, "")
+		require.NoError(t, err)
+
+		c := &parallelTestConfig{
+			BaseConfig: NewBasicConfig("/", "faketerraform", "ft", nil, []CliFlagAssignedVariables{
+				NewCliFlagAssignedVariable("model_provider", `{
+  api_key_ref = "provider-key"
+}`),
+			}, nil),
+			parallelism: 3,
+		}
+		require.NoError(t, InitConfig(c, hclBlocks))
+
+		variables := make(map[string]*VariableBlock)
+		for _, variable := range Blocks[*VariableBlock](c) {
+			variables[variable.Name()] = variable
+		}
+		require.Equal(t, cty.StringVal("hello"), *variables["target"].variableValue)
+		require.Equal(t, cty.StringVal("world"), *variables["audience"].variableValue)
+		require.Equal(t, cty.ObjectVal(map[string]cty.Value{
+			"api_key_ref": cty.StringVal("provider-key"),
+			"region":      cty.StringVal("us-east-1"),
+		}), *variables["model_provider"].variableValue)
+	}
 }
 
 func TestRunApplyOnParallelHonorsParallelism(t *testing.T) {

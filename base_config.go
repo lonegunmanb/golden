@@ -154,7 +154,7 @@ func NewBasicConfig(basedir, dslFullName, dslAbbreviation string, varConfigDir *
 }
 
 func (c *BaseConfig) RunPrePlan() error {
-	return c.runDag(prePlan)
+	return c.d.runDagSerial(c, prePlan)
 }
 
 func (c *BaseConfig) RunPlan() error {
