@@ -206,7 +206,7 @@ func readRawHclSyntaxBlock(b *hclsyntax.Block) []*hclsyntax.Block {
 			}
 		}
 	default:
-		if block, ok := blockSamples[b.Type]; ok && block.Type() == "" {
+		if block, ok := lookupBlockSample(b.Type); ok && block.Type() == "" {
 			b = &hclsyntax.Block{
 				Type:            b.Type,
 				Labels:          append([]string{""}, b.Labels...),

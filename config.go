@@ -82,12 +82,11 @@ func InitConfig(config Config, hclBlocks []*HclBlock) error {
 }
 
 func wrapBlock(c Config, hb *HclBlock) (Block, error) {
-	blockFactories := factories[hb.Type]
 	blockType := ""
 	if len(hb.Labels) > 0 {
 		blockType = hb.Labels[0]
 	}
-	f, ok := blockFactories[blockType]
+	f, ok := lookupBlockConstructor(hb.Type, blockType)
 	if !ok {
 		return nil, fmt.Errorf("unregistered %s: %s", hb.Type, blockType)
 	}
