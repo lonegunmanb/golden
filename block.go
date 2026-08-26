@@ -40,6 +40,10 @@ type Block interface {
 	isReadyForRead() bool
 	markReady()
 	expandable() bool
+	lockValue()
+	unlockValue()
+	rlockValue()
+	runlockValue()
 }
 
 func BlockToString(f Block) string {
@@ -58,11 +62,16 @@ func Decode(b Block) error {
 	if err := verifyDependsOn(b); err != nil {
 		return err
 	}
-	zeroBlock(b)
 	evalContext := b.EvalContext()
+	// The decode below resets and rewrites the block's attributes, so it must
+	// not overlap with another goroutine reading this block for an eval
+	// context while the DAG runs in parallel.
+	b.lockValue()
+	defer b.unlockValue()
 	if customDecode, ok := b.(CustomDecode); ok {
 		return customDecode.Decode(hb, evalContext)
 	}
+	zeroBlock(b)
 	if baseDecode, ok := b.(BaseDecode); ok {
 		err := baseDecode.BaseDecode(hb, evalContext)
 		if err != nil {
@@ -217,7 +226,11 @@ func blockToCtyValue(b Block) cty.Value {
 	baseCtyValues := b.BaseValues()
 	var ctyValues map[string]cty.Value
 	if valuable, ok := b.(Valuable); ok {
+		// Custom Values implementations read the block's fields, which Decode
+		// may rewrite concurrently while the DAG runs in parallel.
+		b.rlockValue()
 		ctyValues = valuable.Values()
+		b.runlockValue()
 	} else {
 		ctyValues = Value(b)
 	}

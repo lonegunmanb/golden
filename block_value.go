@@ -10,6 +10,11 @@ import (
 func Value(b Block) map[string]cty.Value {
 	values := make(map[string]cty.Value)
 
+	// Decoding may rewrite the block's attributes concurrently while the DAG
+	// runs in parallel, so reflect over the fields under the block's read lock.
+	b.rlockValue()
+	defer b.runlockValue()
+
 	blockType := reflect.TypeOf(b)
 	blockValue := reflect.ValueOf(b)
 
