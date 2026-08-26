@@ -526,7 +526,7 @@ locals {
 	// Mark the block ready and add it to the DAG so the parallel local's eval
 	// context reads it via SingleValues, mirroring the issue's local.source.
 	gatedBlock.markReady()
-	require.NoError(t, c.BaseConfig.d.AddVertexByID(gatedBlock.Address(), gatedBlock))
+	require.NoError(t, c.d.AddVertexByID(gatedBlock.Address(), gatedBlock))
 
 	planErr := make(chan error, 1)
 	go func() {
