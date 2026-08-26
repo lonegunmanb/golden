@@ -23,6 +23,10 @@ type BaseBlock struct {
 	readyForRead  bool
 	preConditions []PreCondition
 	stateMu       sync.RWMutex
+	// valueMu serializes attribute writes performed by Decode with attribute
+	// reads performed while building eval contexts, so independent blocks may
+	// plan in parallel without racing on their fields.
+	valueMu sync.RWMutex
 }
 
 func NewBaseBlock(c Config, hb *HclBlock) *BaseBlock {
@@ -151,6 +155,34 @@ func (bb *BaseBlock) setMetaNestedBlock() {
 			})
 		}
 	}
+}
+
+func (bb *BaseBlock) lockValue() {
+	if bb == nil {
+		return
+	}
+	bb.valueMu.Lock()
+}
+
+func (bb *BaseBlock) unlockValue() {
+	if bb == nil {
+		return
+	}
+	bb.valueMu.Unlock()
+}
+
+func (bb *BaseBlock) rlockValue() {
+	if bb == nil {
+		return
+	}
+	bb.valueMu.RLock()
+}
+
+func (bb *BaseBlock) runlockValue() {
+	if bb == nil {
+		return
+	}
+	bb.valueMu.RUnlock()
 }
 
 func (bb *BaseBlock) markExpanded() {

@@ -47,11 +47,15 @@ func (l *LocalBlock) parseValue() error {
 	if diag.HasErrors() {
 		return diag
 	}
+	l.lockValue()
+	defer l.unlockValue()
 	l.LocalValue = value
 	return nil
 }
 
 func (l *LocalBlock) Value() cty.Value {
+	l.rlockValue()
+	defer l.runlockValue()
 	return l.LocalValue
 }
 

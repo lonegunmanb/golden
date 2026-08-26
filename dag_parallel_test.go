@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -436,6 +437,124 @@ resource "dummy" downstream {
 	}))
 
 	assert.Equal(t, map[string]string{"value": "applied"}, resourcesByName["downstream"].Tags)
+}
+
+// gatedSingleValue is a ready-for-read SingleValueBlock whose Value reports
+// when a read starts, then blocks until it is released, so a parallel decode
+// of the same block is forced to overlap the read.
+type gatedSingleValue struct {
+	*BaseBlock
+	Tags map[string]string `json:"tags" hcl:"tags,optional"`
+
+	gateOnce    sync.Once
+	readStarted chan struct{}
+	readRelease <-chan struct{}
+}
+
+func (b *gatedSingleValue) Type() string {
+	return "gated"
+}
+
+func (b *gatedSingleValue) BlockType() string {
+	return "gated"
+}
+
+func (b *gatedSingleValue) AddressLength() int {
+	return 1
+}
+
+func (b *gatedSingleValue) CanExecutePrePlan() bool {
+	return false
+}
+
+func (b *gatedSingleValue) Decode(hb *HclBlock, ctx *hcl.EvalContext) error {
+	// Emulate the field rewrite that Decode performs, so a concurrent Value
+	// read through a parallel local's eval context overlaps the write.
+	b.Tags = map[string]string{"value": "decoded"}
+	return nil
+}
+
+func (b *gatedSingleValue) Value() cty.Value {
+	b.rlockValue()
+	defer b.runlockValue()
+	// Only the first read is gated; gateOnce keeps the channel close and the
+	// field writes race-free when the eval context is built concurrently.
+	b.gateOnce.Do(func() {
+		close(b.readStarted)
+		<-b.readRelease
+	})
+	return cty.ObjectVal(map[string]cty.Value{
+		"tags": ToCtyValue(b.Tags),
+	})
+}
+
+func TestParallelConfigRunPlanDecodeDoesNotRaceWithValueReads(t *testing.T) {
+	// Regression test for the race between Decode's field rewrite on a block
+	// and SingleValueBlock.Value reads through SingleValues while the DAG
+	// plans in parallel. The gated block is already marked ready (as the
+	// issue's local.source was), so a parallel local's evaluation reads its
+	// value through SingleValues for the eval context, while a concurrent
+	// dagPlan decodes the same block (its custom Decode rewrites its fields).
+	// The per-block lock must serialize the decode's writes with the
+	// eval-context reads; otherwise the race detector reports the overlap.
+	testBase := newTestBase()
+	defer testBase.teardown()
+	testBase.dummyFsWithFiles(map[string]string{
+		"test.hcl": `
+locals {
+  a = "world"
+}
+`,
+	})
+
+	hclBlocks, err := loadHclBlocks(false, "")
+	require.NoError(t, err)
+	c := &parallelTestConfig{
+		BaseConfig:  NewBasicConfig("/", "faketerraform", "ft", nil, nil, nil),
+		parallelism: 2,
+	}
+	require.NoError(t, InitConfig(c, hclBlocks))
+
+	readStarted := make(chan struct{})
+	readRelease := make(chan struct{})
+	gatedBlock := &gatedSingleValue{
+		BaseBlock:   NewBaseBlock(c, nil),
+		Tags:        map[string]string{"value": "hello"},
+		readStarted: readStarted,
+		readRelease: readRelease,
+	}
+	// Mark the block ready and add it to the DAG so the parallel local's eval
+	// context reads it via SingleValues, mirroring the issue's local.source.
+	gatedBlock.markReady()
+	require.NoError(t, c.BaseConfig.d.AddVertexByID(gatedBlock.Address(), gatedBlock))
+
+	planErr := make(chan error, 1)
+	go func() {
+		planErr <- c.RunPlan()
+	}()
+
+	// Wait until the local's evaluation is reading the gated block's value,
+	// then decode the same block concurrently (as dagPlan does on the other
+	// ready branch). With the per-block lock, the decode waits for the read
+	// and both are serialized; without it, the decode's write overlaps the
+	// read and the race detector reports it.
+	select {
+	case <-readStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the value read to start")
+	}
+	decodeDone := make(chan error, 1)
+	go func() {
+		decodeDone <- Decode(gatedBlock)
+	}()
+	// Give the decode a chance to overlap the in-flight read before
+	// releasing the read.
+	time.Sleep(100 * time.Millisecond)
+	close(readRelease)
+	require.NoError(t, <-decodeDone)
+	require.NoError(t, <-planErr)
+
+	assert.Equal(t, map[string]string{"value": "decoded"}, gatedBlock.Tags)
 }
 
 func TestParallelConfigRunPlanSupportsForEachDependencies(t *testing.T) {

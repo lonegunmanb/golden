@@ -927,4 +927,20 @@ func (c fakeBlock) expandable() bool {
 	panic("implement me")
 }
 
+func (c fakeBlock) lockValue() {
+	panic("implement me")
+}
+
+func (c fakeBlock) unlockValue() {
+	panic("implement me")
+}
+
+func (c fakeBlock) rlockValue() {
+	panic("implement me")
+}
+
+func (c fakeBlock) runlockValue() {
+	panic("implement me")
+}
+
 var _ Block = fakeBlock{}
