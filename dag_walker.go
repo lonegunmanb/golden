@@ -26,7 +26,7 @@ func (d dagWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
 		for _, traversal := range traversals {
 			for i, traverser := range traversal {
 				name := name(traverser)
-				refIter, ok := refIters[name]
+				refIter, ok := lookupRefIterator(name)
 				if !ok {
 					continue
 				}
