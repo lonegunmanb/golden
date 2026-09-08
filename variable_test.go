@@ -246,6 +246,25 @@ func (s *variableSuite) TestReadVariableValue_ReadValueFromStdPromoter() {
 	}
 }
 
+func (s *variableSuite) TestReadVariableValue_ParseErrorShouldNotPrompt() {
+	s.dummyFsWithFiles(map[string]string{
+		"/bad.tfvars.json": `{invalid json`,
+		"test.hcl": `variable "string_value" {
+}`,
+	})
+	mockPromoter := &mockVariableValuePromoter{
+		mockInput: "hello",
+	}
+	stub := gostub.Stub(&valuePromoter, mockPromoter)
+	defer stub.Reset()
+	_, err := BuildDummyConfig("/", "", []CliFlagAssignedVariables{
+		NewCliFlagAssignedVariableFile("/bad.tfvars.json"),
+	}, nil)
+	require.Error(s.T(), err)
+	s.Contains(err.Error(), "bad.tfvars.json")
+	s.Empty(mockPromoter.sb.String())
+}
+
 func (s *variableSuite) TestExecuteBeforePlan_TypeConvert() {
 	cases := []struct {
 		desc                      string

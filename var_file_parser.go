@@ -42,9 +42,34 @@ func (h hclFileParser) ParseFile(content []byte, fileName string) (*hcl.File, er
 	parser := hclparse.NewParser()
 	file, diag := parser.ParseHCL(content, fileName)
 	if diag.HasErrors() {
-		return nil, diag
+		// A heredoc whose closing marker is on the last line without a trailing
+		// newline is reported as unterminated. Retry once with a trailing
+		// newline so such files parse successfully.
+		if !onlyUnterminatedTemplateAtEOF(diag, len(content)) {
+			return nil, diag
+		}
+		// The parser caches files by name, so the retry requires a new parser.
+		file, diag = hclparse.NewParser().ParseHCL(append(content, '\n'), fileName)
+		if diag.HasErrors() {
+			return nil, diag
+		}
 	}
 	return file, nil
+}
+
+func onlyUnterminatedTemplateAtEOF(diag hcl.Diagnostics, contentLen int) bool {
+	for _, d := range diag {
+		if d.Severity != hcl.DiagError {
+			return false
+		}
+		if d.Detail != "No closing marker was found for the string." {
+			return false
+		}
+		if d.Subject == nil || d.Subject.End.Byte != contentLen {
+			return false
+		}
+	}
+	return true
 }
 
 var _ varFileParser = varFileParserImpl{}
