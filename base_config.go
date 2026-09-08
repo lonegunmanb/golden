@@ -36,6 +36,7 @@ type BaseConfig struct {
 	dslAbbreviation          string
 	cliFlagAssignedVariables []CliFlagAssignedVariables
 	inputVariables           map[string]VariableValueRead
+	inputVariablesReadErr    error
 	inputVariableReadsLoader *sync.Once
 	ignoreUnknownVariables   bool
 	// Empty expansions leave the DAG but still need an addressable evaluation namespace.
@@ -192,29 +193,28 @@ func (c *BaseConfig) ValidBlockAddress(address string) bool {
 
 func (c *BaseConfig) readInputVariables() (map[string]VariableValueRead, error) {
 	if c.inputVariables != nil {
-		return c.inputVariables, nil
+		return c.inputVariables, c.inputVariablesReadErr
 	}
-	var readErr error
 	c.inputVariableReadsLoader.Do(func() {
 		envVars := c.readVariablesFromEnv()
 		defaultFileVars, err := c.readVariablesFromDefaultVarFiles()
 		if err != nil {
-			readErr = err
+			c.inputVariablesReadErr = err
 			return
 		}
 		autoFileVars, err := c.readVariablesFromAutoVarFiles()
 		if err != nil {
-			readErr = err
+			c.inputVariablesReadErr = err
 			return
 		}
 		cliAssignedVariables, err := c.readCliAssignedVariables()
 		if err != nil {
-			readErr = err
+			c.inputVariablesReadErr = err
 			return
 		}
 		c.inputVariables = merge(envVars, defaultFileVars, autoFileVars, cliAssignedVariables)
 	})
-	return c.inputVariables, readErr
+	return c.inputVariables, c.inputVariablesReadErr
 }
 
 func (c *BaseConfig) readVariablesFromEnv() map[string]VariableValueRead {

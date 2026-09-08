@@ -480,6 +480,41 @@ string_value = "world"
 	}
 }
 
+func (s *baseConfigSuite) TestReadInputVariables_ParseErrorReturnedToEveryCaller() {
+	s.dummyFsWithFiles(map[string]string{
+		"/bad.tfvars.json": `{invalid json`,
+	})
+	sut := NewBasicConfig("/", "faketerraform", "ft", nil, []CliFlagAssignedVariables{
+		NewCliFlagAssignedVariableFile("/bad.tfvars.json"),
+	}, nil)
+	_, firstErr := sut.readInputVariables()
+	require.Error(s.T(), firstErr)
+	_, secondErr := sut.readInputVariables()
+	require.Error(s.T(), secondErr)
+	s.Equal(firstErr.Error(), secondErr.Error())
+}
+
+func (s *baseConfigSuite) TestReadInputVariables_CliVarFileWithHeredocMarkerAtEof() {
+	s.dummyFsWithFiles(map[string]string{
+		"/test.tfvars": "string_value = <<-EOT\nhello\nEOT",
+	})
+	s.dummyFsWithFiles(map[string]string{
+		"test.hcl": `variable "string_value" {
+}`,
+	})
+	config, err := BuildDummyConfig("/", "", []CliFlagAssignedVariables{
+		NewCliFlagAssignedVariableFile("/test.tfvars"),
+	}, nil)
+	require.NoError(s.T(), err)
+	sut := config.(*DummyConfig).BaseConfig
+	vars, err := sut.readInputVariables()
+	require.NoError(s.T(), err)
+	read, ok := vars["string_value"]
+	require.True(s.T(), ok)
+	require.NoError(s.T(), read.Error)
+	s.Equal(cty.StringVal("hello\n"), *read.Value)
+}
+
 func TestBaseConfig_OverrideFunctions(t *testing.T) {
 	// Define a custom function
 	customFunc := function.New(&function.Spec{
