@@ -49,7 +49,10 @@ func (h hclFileParser) ParseFile(content []byte, fileName string) (*hcl.File, er
 			return nil, diag
 		}
 		// The parser caches files by name, so the retry requires a new parser.
-		file, diag = hclparse.NewParser().ParseHCL(append(content, '\n'), fileName)
+		retryContent := make([]byte, 0, len(content)+1)
+		retryContent = append(retryContent, content...)
+		retryContent = append(retryContent, '\n')
+		file, diag = hclparse.NewParser().ParseHCL(retryContent, fileName)
 		if diag.HasErrors() {
 			return nil, diag
 		}
