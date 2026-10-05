@@ -142,3 +142,7 @@ func TestDecodeMarkedStringWithOtherDiagnosticDoesNotLeak(t *testing.T) {
 	assert.NotContains(t, err.Error(), "fake-credential")
 	assert.NotContains(t, BlockToString(block), "fake-credential")
 }
+
+func TestBlockToStringBeforeDecode(t *testing.T) {
+	assert.NotPanics(t, func() { BlockToString(&markedDecodeBlock{}) })
+}
