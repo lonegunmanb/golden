@@ -86,7 +86,7 @@ func markedDecodeField(ty reflect.Type, name, kind string) (reflect.StructField,
 		if tag[0] != name {
 			continue
 		}
-		if kind == "" && (len(tag) == 1 || len(tag) == 2 && tag[1] == "optional") {
+		if kind == "" && (len(tag) == 1 || len(tag) == 2 && (tag[1] == "optional" || tag[1] == "attr")) {
 			return field, true
 		}
 		for _, part := range tag[1:] {
