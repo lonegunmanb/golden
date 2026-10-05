@@ -52,32 +52,37 @@ func TestDecodeMarkedNestedCredentials(t *testing.T) {
 		name       string
 		attributes string
 		token      cty.Value
-		wantError  bool
 	}{
-		{"unmarked pointer", "bearer_token = var.token", cty.StringVal(credential), false},
-		{"marked pointer", "bearer_token = var.token", cty.StringVal(credential).Mark("sensitive"), true},
-		{"marked string", "credential = var.token", cty.StringVal(credential).Mark("sensitive"), true},
-		{"unmarked null pointer", "bearer_token = var.token", cty.NullVal(cty.String), false},
-		{"marked null pointer", "bearer_token = var.token", cty.NullVal(cty.String).Mark("sensitive"), false},
-		{"marked cty value", "raw = var.token", cty.StringVal(credential).Mark("sensitive"), false},
-		{"marked null cty value", "raw = var.token", cty.NullVal(cty.String).Mark("sensitive"), false},
+		{"unmarked pointer", "bearer_token = var.token", cty.StringVal(credential)},
+		{"marked pointer", "bearer_token = var.token", cty.StringVal(credential).Mark("sensitive")},
+		{"marked string", "credential = var.token", cty.StringVal(credential).Mark("sensitive")},
+		{"unmarked null pointer", "bearer_token = var.token", cty.NullVal(cty.String)},
+		{"marked null pointer", "bearer_token = var.token", cty.NullVal(cty.String).Mark("sensitive")},
+		{"marked cty value", "raw = var.token", cty.StringVal(credential).Mark("sensitive")},
+		{"marked null cty value", "raw = var.token", cty.NullVal(cty.String).Mark("sensitive")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			block := newMarkedDecodeBlock(t, tc.attributes, tc.token)
 			var err error
-			assert.NotPanics(t, func() { err = Decode(block) })
-			if tc.wantError {
-				require.Error(t, err)
-				assert.ErrorContains(t, err, "CustomDecode")
-				assert.NotContains(t, err.Error(), credential)
-				return
-			}
+			require.NotPanics(t, func() { err = Decode(block) })
 			require.NoError(t, err)
 			require.Len(t, block.HTTP, 1)
+			reflected := Value(block)["http"].Index(cty.NumberIntVal(0))
 			switch tc.name {
 			case "unmarked pointer":
 				require.NotNil(t, block.HTTP[0].BearerToken)
 				assert.Equal(t, credential, *block.HTTP[0].BearerToken)
+				assert.False(t, reflected.GetAttr("bearer_token").IsMarked())
+			case "marked pointer":
+				require.NotNil(t, block.HTTP[0].BearerToken)
+				assert.Equal(t, credential, *block.HTTP[0].BearerToken)
+				assert.True(t, reflected.GetAttr("bearer_token").IsMarked())
+				assert.NotContains(t, BlockToString(block), credential)
+				assert.True(t, blockToCtyValue(block).GetAttr("http").Index(cty.NumberIntVal(0)).GetAttr("bearer_token").IsMarked())
+			case "marked string":
+				assert.Equal(t, credential, block.HTTP[0].Credential)
+				assert.True(t, reflected.GetAttr("credential").IsMarked())
+				assert.NotContains(t, BlockToString(block), credential)
 			case "unmarked null pointer", "marked null pointer":
 				assert.Nil(t, block.HTTP[0].BearerToken)
 			case "marked cty value", "marked null cty value":
@@ -86,4 +91,15 @@ func TestDecodeMarkedNestedCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeClearsStaleStringMarks(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	block := newMarkedDecodeBlock(t, "bearer_token = var.token", cty.StringVal("fake-credential").Mark("sensitive"))
+	require.NoError(t, Decode(block))
+	block.token = cty.StringVal("new-value")
+	require.NoError(t, Decode(block))
+	require.NotNil(t, block.HTTP[0].BearerToken)
+	assert.Equal(t, "new-value", *block.HTTP[0].BearerToken)
+	assert.False(t, Value(block)["http"].Index(cty.NumberIntVal(0)).GetAttr("bearer_token").IsMarked())
 }
