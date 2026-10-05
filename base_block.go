@@ -27,6 +27,8 @@ type BaseBlock struct {
 	// reads performed while building eval contexts, so independent blocks may
 	// plan in parallel without racing on their fields.
 	valueMu sync.RWMutex
+	// decodedMarks follow fields in reflected cty values; protected by valueMu.
+	decodedMarks []cty.PathValueMarks
 }
 
 func NewBaseBlock(c Config, hb *HclBlock) *BaseBlock {
@@ -71,6 +73,14 @@ func (bb *BaseBlock) BaseValues() map[string]cty.Value {
 	return map[string]cty.Value{
 		"id": cty.StringVal(bb.id),
 	}
+}
+
+func (bb *BaseBlock) setDecodedMarks(marks []cty.PathValueMarks) {
+	bb.decodedMarks = marks
+}
+
+func (bb *BaseBlock) getDecodedMarks() []cty.PathValueMarks {
+	return bb.decodedMarks
 }
 
 func (bb *BaseBlock) EvalContext() *hcl.EvalContext {

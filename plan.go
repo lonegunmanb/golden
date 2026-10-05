@@ -3,6 +3,7 @@ package golden
 import (
 	"fmt"
 	"github.com/hashicorp/go-multierror"
+	"github.com/zclconf/go-cty/cty"
 )
 
 type Plan interface {
@@ -16,6 +17,9 @@ func dagPlan(b Block) error {
 		return fmt.Errorf("%s(%s) Decode error: %+v", b.Address(), b.HclBlock().Range().String(), decodeErr)
 	}
 	if validateErr := Validate.Struct(b); validateErr != nil {
+		if marked, ok := b.(interface{ getDecodedMarks() []cty.PathValueMarks }); ok && len(marked.getDecodedMarks()) != 0 {
+			return fmt.Errorf("%s.%s.%s is not valid (sensitive value redacted)", b.BlockType(), b.Type(), b.Name())
+		}
 		return fmt.Errorf("%s.%s.%s is not valid: %s", b.BlockType(), b.Type(), b.Name(), validateErr.Error())
 	}
 	failedChecks, preConditionCheckError := b.PreConditionCheck(b.EvalContext())

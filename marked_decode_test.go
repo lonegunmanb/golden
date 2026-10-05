@@ -36,7 +36,12 @@ func (b *markedDecodeBlock) EvalContext() *hcl.EvalContext {
 
 func newMarkedDecodeBlock(t *testing.T, attributes string, token cty.Value) *markedDecodeBlock {
 	t.Helper()
-	source := []byte("marked_decode \"test\" \"example\" {\n  http {\n" + attributes + "\n  }\n}")
+	return newMarkedDecodeBlockBody(t, "  http {\n"+attributes+"\n  }", token)
+}
+
+func newMarkedDecodeBlockBody(t *testing.T, body string, token cty.Value) *markedDecodeBlock {
+	t.Helper()
+	source := []byte("marked_decode \"test\" \"example\" {\n" + body + "\n}")
 	parsed, diags := hclsyntax.ParseConfig(source, "marked_decode.hcl", hcl.InitialPos)
 	require.False(t, diags.HasErrors(), "%s", diags)
 	written, diags := hclwrite.ParseConfig(source, "marked_decode.hcl", hcl.InitialPos)
@@ -102,4 +107,38 @@ func TestDecodeClearsStaleStringMarks(t *testing.T) {
 	require.NotNil(t, block.HTTP[0].BearerToken)
 	assert.Equal(t, "new-value", *block.HTTP[0].BearerToken)
 	assert.False(t, Value(block)["http"].Index(cty.NumberIntVal(0)).GetAttr("bearer_token").IsMarked())
+}
+
+func TestDecodeMarkedStringMultipleBlocks(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	block := newMarkedDecodeBlockBody(t, `  http {
+    credential = "public"
+    bearer_token = var.token
+	  raw = var.token
+	}
+	http {
+	  credential = var.token
+	  bearer_token = var.token
+	  raw = var.token
+  }`, cty.StringVal("fake-credential").Mark("sensitive"))
+	require.NoError(t, Decode(block))
+	require.Len(t, block.HTTP, 2)
+	require.NotNil(t, block.HTTP[0].BearerToken)
+	assert.Equal(t, "fake-credential", *block.HTTP[0].BearerToken)
+	assert.Equal(t, "fake-credential", block.HTTP[1].Credential)
+	http := Value(block)["http"]
+	assert.False(t, http.Index(cty.NumberIntVal(0)).GetAttr("credential").IsMarked())
+	assert.True(t, http.Index(cty.NumberIntVal(0)).GetAttr("bearer_token").IsMarked())
+	assert.True(t, http.Index(cty.NumberIntVal(1)).GetAttr("credential").IsMarked())
+	assert.True(t, http.Index(cty.NumberIntVal(1)).GetAttr("raw").IsMarked())
+	assert.NotContains(t, BlockToString(block), "fake-credential")
+}
+
+func TestDecodeMarkedStringWithOtherDiagnosticDoesNotLeak(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	block := newMarkedDecodeBlock(t, "bearer_token = var.token\n    unexpected = true", cty.StringVal("fake-credential").Mark("sensitive"))
+	err := Decode(block)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "fake-credential")
+	assert.NotContains(t, BlockToString(block), "fake-credential")
 }

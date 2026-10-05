@@ -14,13 +14,14 @@ A simple example to show how to customize your own DSL is in our roadmap.
 
 ## Marked values during decoding
 
-The default `Decode` path preserves cty marks when an HCL attribute is decoded
-into a `cty.Value` field. Ordinary Go fields (including nested `string` and
-`*string` fields) cannot carry marks: decoding a marked non-null value into one
-returns a diagnostic instead of discarding its marks or panicking. A marked
-null string can still decode into a nil `*string`.
+The default `Decode` path accepts marked strings in Go `string` and `*string`
+fields, including nested blocks. The Go field contains the string needed by
+the credential consumer; a marked null string still decodes to a nil pointer.
+Marks remain on `cty.Value` fields and are restored when decoded Go fields
+are exposed through `Value` or the default block evaluation context.
+`BlockToString` and `CtyValueToString` redact marked values.
 
-For sensitive credentials, use a `cty.Value` field or implement `CustomDecode`
-to handle marked values explicitly. If a custom decoder unwraps a secret to
-pass it to a credential consumer, it must preserve redaction in diagnostics,
-plans, logs, and outputs.
+Ordinary Go strings cannot carry marks. Do not print or serialize a sensitive
+Go field directly, or include its value in errors, plans, or logs. Use
+`cty.Value` for other marked types, or implement `CustomDecode` when
+application-specific handling is needed.
