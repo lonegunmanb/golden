@@ -80,6 +80,9 @@ func (bb *BaseBlock) setDecodedMarks(marks []cty.PathValueMarks) {
 }
 
 func (bb *BaseBlock) getDecodedMarks() []cty.PathValueMarks {
+	if bb == nil {
+		return nil
+	}
 	return bb.decodedMarks
 }
 

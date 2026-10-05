@@ -1,9 +1,11 @@
 package golden
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/stretchr/testify/assert"
@@ -145,4 +147,23 @@ func TestDecodeMarkedStringWithOtherDiagnosticDoesNotLeak(t *testing.T) {
 
 func TestBlockToStringBeforeDecode(t *testing.T) {
 	assert.NotPanics(t, func() { BlockToString(&markedDecodeBlock{}) })
+	assert.NotPanics(t, func() { Value(&markedDecodeBlock{}) })
+}
+
+func TestMarkedStringBodyExplicitAttrTag(t *testing.T) {
+	type target struct {
+		Credential string `hcl:"credential,attr"`
+	}
+	parsed, diags := hclsyntax.ParseConfig([]byte("credential = var.token"), "marked.hcl", hcl.InitialPos)
+	require.False(t, diags.HasErrors())
+	var marks []cty.PathValueMarks
+	body := markedStringBody{Body: parsed.Body, target: reflect.TypeOf(target{}), marks: &marks}
+	var decoded target
+	diags = gohcl.DecodeBody(body, &hcl.EvalContext{Variables: map[string]cty.Value{
+		"var": cty.ObjectVal(map[string]cty.Value{"token": cty.StringVal("fake-credential").Mark("sensitive")}),
+	}}, &decoded)
+	require.False(t, diags.HasErrors(), "%s", diags)
+	assert.Equal(t, "fake-credential", decoded.Credential)
+	require.Len(t, marks, 1)
+	assert.True(t, marks[0].Path.Equals(cty.Path{}.GetAttr("credential")))
 }
