@@ -57,6 +57,8 @@ func BlockToString(f Block) string {
 var MetaAttributeNames = hashset.New("for_each", "depends_on")
 var MetaNestedBlockNames = hashset.New("precondition", "dynamic")
 
+// Decode preserves marked values in cty.Value fields. Marked values that cannot
+// be represented in ordinary Go fields require a CustomDecode implementation.
 func Decode(b Block) error {
 	hb := b.HclBlock()
 	if err := verifyDependsOn(b); err != nil {
@@ -84,13 +86,31 @@ func Decode(b Block) error {
 		return err
 	}
 
-	diag := gohcl.DecodeBody(cleanBodyForDecode(expandedHb.Body), evalContext, b)
+	diag := decodeBody(expandedHb.Body, evalContext, b)
 	if diag.HasErrors() {
 		return diag
 	}
 	// we need set defaults again, since gohcl.DecodeBody might erase default value set on those attribute has null values.
 	defaults.SetDefaults(b)
 	return nil
+}
+
+func decodeBody(body *hclsyntax.Body, context *hcl.EvalContext, b Block) (diags hcl.Diagnostics) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message, ok := recovered.(string)
+			if !ok || message != "value is marked, so must be unmarked first" {
+				panic(recovered)
+			}
+			diags = hcl.Diagnostics{&hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  "Cannot decode marked value into Go field",
+				Detail:   "Marked values cannot be decoded into ordinary Go fields without losing their marks. Use a cty.Value field to retain marks, or implement CustomDecode to handle them explicitly and keep sensitive values redacted.",
+				Subject:  body.MissingItemRange().Ptr(),
+			}}
+		}
+	}()
+	return gohcl.DecodeBody(cleanBodyForDecode(body), context, b)
 }
 
 func zeroBlock(b Block) {

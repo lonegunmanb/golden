@@ -11,3 +11,16 @@ Golden has implemented `local` block.
 Golden has implemented support for `for_each` and `precondition` in blocks.
 
 A simple example to show how to customize your own DSL is in our roadmap.
+
+## Marked values during decoding
+
+The default `Decode` path preserves cty marks when an HCL attribute is decoded
+into a `cty.Value` field. Ordinary Go fields (including nested `string` and
+`*string` fields) cannot carry marks: decoding a marked non-null value into one
+returns a diagnostic instead of discarding its marks or panicking. A marked
+null string can still decode into a nil `*string`.
+
+For sensitive credentials, use a `cty.Value` field or implement `CustomDecode`
+to handle marked values explicitly. If a custom decoder unwraps a secret to
+pass it to a credential consumer, it must preserve redaction in diagnostics,
+plans, logs, and outputs.
