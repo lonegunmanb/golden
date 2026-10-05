@@ -47,6 +47,14 @@ type Block interface {
 }
 
 func BlockToString(f Block) string {
+	if marked, ok := f.(interface{ getDecodedMarks() []cty.PathValueMarks }); ok {
+		f.rlockValue()
+		hasMarks := len(marked.getDecodedMarks()) != 0
+		f.runlockValue()
+		if hasMarks {
+			return "<sensitive>"
+		}
+	}
 	if s, ok := f.(fmt.Stringer); ok {
 		return s.String()
 	}
@@ -57,8 +65,8 @@ func BlockToString(f Block) string {
 var MetaAttributeNames = hashset.New("for_each", "depends_on")
 var MetaNestedBlockNames = hashset.New("precondition", "dynamic")
 
-// Decode preserves marked values in cty.Value fields. Marked values that cannot
-// be represented in ordinary Go fields require a CustomDecode implementation.
+// Decode preserves marked values in cty.Value fields. Marked strings can also
+// populate Go string fields; their marks are retained when reflecting block values.
 func Decode(b Block) error {
 	hb := b.HclBlock()
 	if err := verifyDependsOn(b); err != nil {
@@ -70,6 +78,9 @@ func Decode(b Block) error {
 	// context while the DAG runs in parallel.
 	b.lockValue()
 	defer b.unlockValue()
+	if marked, ok := b.(interface{ setDecodedMarks([]cty.PathValueMarks) }); ok {
+		marked.setDecodedMarks(nil)
+	}
 	if customDecode, ok := b.(CustomDecode); ok {
 		return customDecode.Decode(hb, evalContext)
 	}
@@ -86,7 +97,16 @@ func Decode(b Block) error {
 		return err
 	}
 
-	diag := decodeBody(expandedHb.Body, evalContext, b)
+	var marks []cty.PathValueMarks
+	body := markedStringBody{
+		Body:   cleanBodyForDecode(expandedHb.Body),
+		target: reflect.TypeOf(b).Elem(),
+		marks:  &marks,
+	}
+	diag := decodeBody(body, evalContext, b)
+	if marked, ok := b.(interface{ setDecodedMarks([]cty.PathValueMarks) }); ok {
+		marked.setDecodedMarks(marks)
+	}
 	if diag.HasErrors() {
 		return diag
 	}
@@ -95,7 +115,7 @@ func Decode(b Block) error {
 	return nil
 }
 
-func decodeBody(body *hclsyntax.Body, context *hcl.EvalContext, b Block) (diags hcl.Diagnostics) {
+func decodeBody(body hcl.Body, context *hcl.EvalContext, b Block) (diags hcl.Diagnostics) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message, ok := recovered.(string)
@@ -110,7 +130,7 @@ func decodeBody(body *hclsyntax.Body, context *hcl.EvalContext, b Block) (diags 
 			}}
 		}
 	}()
-	return gohcl.DecodeBody(cleanBodyForDecode(body), context, b)
+	return gohcl.DecodeBody(body, context, b)
 }
 
 func zeroBlock(b Block) {

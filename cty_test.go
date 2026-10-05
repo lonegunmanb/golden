@@ -229,6 +229,16 @@ func TestCtyValueToString(t *testing.T) {
 			want: "hello",
 		},
 		{
+			name: "marked string",
+			val:  cty.StringVal("fake-credential").Mark("sensitive"),
+			want: "<sensitive>",
+		},
+		{
+			name: "list with marked string",
+			val:  cty.ListVal([]cty.Value{cty.StringVal("public"), cty.StringVal("fake-credential").Mark("sensitive")}),
+			want: "[public, <sensitive>]",
+		},
+		{
 			name: "number",
 			val:  cty.NumberIntVal(123),
 			want: "123",
