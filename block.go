@@ -47,13 +47,8 @@ type Block interface {
 }
 
 func BlockToString(f Block) string {
-	if marked, ok := f.(interface{ getDecodedMarks() []cty.PathValueMarks }); ok {
-		f.rlockValue()
-		hasMarks := len(marked.getDecodedMarks()) != 0
-		f.runlockValue()
-		if hasMarks {
-			return "<sensitive>"
-		}
+	if marked, ok := f.(interface{ hasDecodedMarks() bool }); ok && marked.hasDecodedMarks() {
+		return "<sensitive>"
 	}
 	if s, ok := f.(fmt.Stringer); ok {
 		return s.String()

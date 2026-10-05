@@ -83,6 +83,15 @@ func (bb *BaseBlock) getDecodedMarks() []cty.PathValueMarks {
 	return bb.decodedMarks
 }
 
+func (bb *BaseBlock) hasDecodedMarks() bool {
+	if bb == nil {
+		return false
+	}
+	bb.valueMu.RLock()
+	defer bb.valueMu.RUnlock()
+	return len(bb.decodedMarks) != 0
+}
+
 func (bb *BaseBlock) EvalContext() *hcl.EvalContext {
 	var ctx *hcl.EvalContext
 	if bb.c == nil {
