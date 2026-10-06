@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 )
 
 // markedStringBody unmarks only string expressions destined for Go fields.
@@ -25,7 +26,11 @@ func (body markedStringBody) Content(schema *hcl.BodySchema) (*hcl.BodyContent, 
 func (body markedStringBody) PartialContent(schema *hcl.BodySchema) (*hcl.BodyContent, hcl.Body, hcl.Diagnostics) {
 	content, remaining, diags := body.Body.PartialContent(schema)
 	if remaining != nil {
-		remaining = markedStringBody{Body: remaining, marks: body.marks}
+		if field, ok := markedDecodeField(body.target, "", "remain"); ok && field.Type.Kind() == reflect.Struct {
+			remaining = markedStringBody{
+				Body: remaining, target: field.Type, path: body.path.GetAttr(outputFieldName(field)), marks: body.marks,
+			}
+		}
 	}
 	return body.wrapContent(content), remaining, diags
 }
@@ -113,8 +118,15 @@ type markedStringExpr struct {
 
 func (expr markedStringExpr) Value(ctx *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
 	value, diags := expr.Expression.Value(ctx)
-	if value.Type() != cty.String || !value.IsMarked() || value.IsNull() {
+	if !value.IsMarked() || value.IsNull() || !value.IsKnown() || diags.HasErrors() {
 		return value, diags
+	}
+	if value.Type() != cty.String {
+		converted, err := convert.Convert(value, cty.String)
+		if err != nil {
+			return value, diags
+		}
+		value = converted
 	}
 	unmarked, marks := value.Unmark()
 	*expr.marks = append(*expr.marks, cty.PathValueMarks{Path: expr.path, Marks: marks})

@@ -63,6 +63,7 @@ func TestDecodeMarkedNestedCredentials(t *testing.T) {
 		{"unmarked pointer", "bearer_token = var.token", cty.StringVal(credential)},
 		{"marked pointer", "bearer_token = var.token", cty.StringVal(credential).Mark("sensitive")},
 		{"marked string", "credential = var.token", cty.StringVal(credential).Mark("sensitive")},
+		{"marked number converted to string", "bearer_token = var.token", cty.NumberIntVal(42).Mark("sensitive")},
 		{"unmarked null pointer", "bearer_token = var.token", cty.NullVal(cty.String)},
 		{"marked null pointer", "bearer_token = var.token", cty.NullVal(cty.String).Mark("sensitive")},
 		{"marked cty value", "raw = var.token", cty.StringVal(credential).Mark("sensitive")},
@@ -90,6 +91,10 @@ func TestDecodeMarkedNestedCredentials(t *testing.T) {
 				assert.Equal(t, credential, block.HTTP[0].Credential)
 				assert.True(t, reflected.GetAttr("credential").IsMarked())
 				assert.NotContains(t, BlockToString(block), credential)
+			case "marked number converted to string":
+				require.NotNil(t, block.HTTP[0].BearerToken)
+				assert.Equal(t, "42", *block.HTTP[0].BearerToken)
+				assert.True(t, reflected.GetAttr("bearer_token").IsMarked())
 			case "unmarked null pointer", "marked null pointer":
 				assert.Nil(t, block.HTTP[0].BearerToken)
 			case "marked cty value", "marked null cty value":
@@ -166,4 +171,26 @@ func TestMarkedStringBodyExplicitAttrTag(t *testing.T) {
 	assert.Equal(t, "fake-credential", decoded.Credential)
 	require.Len(t, marks, 1)
 	assert.True(t, marks[0].Path.Equals(cty.Path{}.GetAttr("credential")))
+}
+
+func TestMarkedStringBodyRemainField(t *testing.T) {
+	type remainder struct {
+		Credential string `hcl:"credential,attr"`
+	}
+	type target struct {
+		Known string    `hcl:"known,attr"`
+		Extra remainder `hcl:",remain"`
+	}
+	parsed, diags := hclsyntax.ParseConfig([]byte("known = \"public\"\ncredential = var.token"), "marked_remain.hcl", hcl.InitialPos)
+	require.False(t, diags.HasErrors())
+	var marks []cty.PathValueMarks
+	body := markedStringBody{Body: parsed.Body, target: reflect.TypeOf(target{}), marks: &marks}
+	var decoded target
+	diags = gohcl.DecodeBody(body, &hcl.EvalContext{Variables: map[string]cty.Value{
+		"var": cty.ObjectVal(map[string]cty.Value{"token": cty.StringVal("fake-credential").Mark("sensitive")}),
+	}}, &decoded)
+	require.False(t, diags.HasErrors(), "%s", diags)
+	assert.Equal(t, "fake-credential", decoded.Extra.Credential)
+	require.Len(t, marks, 1)
+	assert.True(t, marks[0].Path.Equals(cty.Path{}.GetAttr("").GetAttr("credential")))
 }
