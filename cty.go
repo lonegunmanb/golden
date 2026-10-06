@@ -137,6 +137,9 @@ func CtyValueToString(val cty.Value) string {
 	if val.IsMarked() {
 		val, _ = val.Unmark()
 	}
+	if val != cty.NilVal && !val.IsKnown() {
+		return "<unknown>"
+	}
 	if val.IsNull() && val != cty.NilVal {
 		return "null"
 	}

@@ -267,6 +267,16 @@ func TestCtyValueToString(t *testing.T) {
 			want: "123",
 		},
 		{
+			name: "unknown string with unrelated mark",
+			val:  cty.UnknownVal(cty.String).Mark("origin"),
+			want: "<unknown>",
+		},
+		{
+			name: "unknown collection with unrelated mark",
+			val:  cty.UnknownVal(cty.List(cty.String)).Mark("origin"),
+			want: "<unknown>",
+		},
+		{
 			name: "bool",
 			val:  cty.BoolVal(true),
 			want: "true",
