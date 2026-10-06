@@ -119,8 +119,8 @@ func decodeBody(body hcl.Body, context *hcl.EvalContext, b Block) (diags hcl.Dia
 			}
 			diags = hcl.Diagnostics{&hcl.Diagnostic{
 				Severity: hcl.DiagError,
-				Summary:  "Cannot decode marked value into Go field",
-				Detail:   "Marked values cannot be decoded into ordinary Go fields without losing their marks. Use a cty.Value field to retain marks, or implement CustomDecode to handle them explicitly and keep sensitive values redacted.",
+				Summary:  "Unsupported marked value for Go field",
+				Detail:   "This marked value cannot be decoded into the destination Go field. Marked strings are supported in string and *string fields; for other marked values, use cty.Value or implement CustomDecode to preserve sensitivity.",
 				Subject:  body.MissingItemRange().Ptr(),
 			}}
 		}
