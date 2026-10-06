@@ -14,14 +14,15 @@ import (
 )
 
 type markedDecodeHTTP struct {
-	Credential  string    `hcl:"credential,optional"`
+	Credential  string    `hcl:"credential,optional" validate:"min=20"`
 	BearerToken *string   `hcl:"bearer_token,optional"`
+	Enabled     bool      `hcl:"enabled,optional"`
 	Raw         cty.Value `hcl:"raw,optional"`
 }
 
 type markedDecodeBlock struct {
 	*BaseBlock
-	HTTP  []markedDecodeHTTP `hcl:"http,block"`
+	HTTP  []markedDecodeHTTP `hcl:"http,block" validate:"dive"`
 	token cty.Value
 }
 
@@ -148,6 +149,48 @@ func TestDecodeMarkedStringWithOtherDiagnosticDoesNotLeak(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "fake-credential")
 	assert.NotContains(t, BlockToString(block), "fake-credential")
+}
+
+func TestDecodeUnrelatedMarkIsNotSensitive(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	block := newMarkedDecodeBlock(t, "bearer_token = var.token", cty.StringVal("public-token").Mark("origin"))
+	require.NoError(t, Decode(block))
+	require.NotNil(t, block.HTTP[0].BearerToken)
+	assert.Equal(t, "public-token", *block.HTTP[0].BearerToken)
+	reflected := Value(block)["http"].Index(cty.NumberIntVal(0)).GetAttr("bearer_token")
+	assert.True(t, reflected.HasMark("origin"))
+	assert.Contains(t, BlockToString(block), "public-token")
+}
+
+func TestPlanValidationOnlyRedactsSensitiveMark(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	for _, tc := range []struct {
+		name string
+		mark string
+		want string
+	}{
+		{"sensitive", "sensitive", "sensitive value redacted"},
+		{"unrelated", "origin", "not valid:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block := newMarkedDecodeBlock(t, "credential = var.token", cty.StringVal("fake-credential").Mark(tc.mark))
+			err := dagPlan(block)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.want)
+			if tc.mark == "sensitive" {
+				assert.NotContains(t, err.Error(), "fake-credential")
+			}
+		})
+	}
+}
+
+func TestDecodeUnsupportedMarkedGoField(t *testing.T) {
+	RegisterBlock(&markedDecodeBlock{})
+	block := newMarkedDecodeBlock(t, "enabled = var.token", cty.True.Mark("origin"))
+	var err error
+	require.NotPanics(t, func() { err = Decode(block) })
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "marked value")
 }
 
 func TestBlockToStringBeforeDecode(t *testing.T) {

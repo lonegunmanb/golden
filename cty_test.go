@@ -234,13 +234,36 @@ func TestCtyValueToString(t *testing.T) {
 			want: "<sensitive>",
 		},
 		{
+			name: "marked string with unrelated mark",
+			val:  cty.StringVal("public").Mark("origin"),
+			want: "public",
+		},
+		{
+			name: "marked string with sensitive and unrelated marks",
+			val:  cty.StringVal("fake-credential").Mark("origin").Mark("sensitive"),
+			want: "<sensitive>",
+		},
+		{
 			name: "list with marked string",
 			val:  cty.ListVal([]cty.Value{cty.StringVal("public"), cty.StringVal("fake-credential").Mark("sensitive")}),
 			want: "[public, <sensitive>]",
 		},
 		{
+			name: "list with mixed marks",
+			val: cty.ListVal([]cty.Value{
+				cty.StringVal("public").Mark("origin"),
+				cty.StringVal("fake-credential").Mark("sensitive"),
+			}),
+			want: "[public, <sensitive>]",
+		},
+		{
 			name: "number",
 			val:  cty.NumberIntVal(123),
+			want: "123",
+		},
+		{
+			name: "number with unrelated mark",
+			val:  cty.NumberIntVal(123).Mark("origin"),
 			want: "123",
 		},
 		{

@@ -47,7 +47,7 @@ type Block interface {
 }
 
 func BlockToString(f Block) string {
-	if marked, ok := f.(interface{ hasDecodedMarks() bool }); ok && marked.hasDecodedMarks() {
+	if marked, ok := f.(decodedMarkCarrier); ok && marked.hasSensitiveDecodedMarks() {
 		return "<sensitive>"
 	}
 	if s, ok := f.(fmt.Stringer); ok {
@@ -73,7 +73,7 @@ func Decode(b Block) error {
 	// context while the DAG runs in parallel.
 	b.lockValue()
 	defer b.unlockValue()
-	if marked, ok := b.(interface{ setDecodedMarks([]cty.PathValueMarks) }); ok {
+	if marked, ok := b.(decodedMarkCarrier); ok {
 		marked.setDecodedMarks(nil)
 	}
 	if customDecode, ok := b.(CustomDecode); ok {
@@ -99,7 +99,7 @@ func Decode(b Block) error {
 		marks:  &marks,
 	}
 	diag := decodeBody(body, evalContext, b)
-	if marked, ok := b.(interface{ setDecodedMarks([]cty.PathValueMarks) }); ok {
+	if marked, ok := b.(decodedMarkCarrier); ok {
 		marked.setDecodedMarks(marks)
 	}
 	if diag.HasErrors() {
@@ -111,6 +111,8 @@ func Decode(b Block) error {
 }
 
 func decodeBody(body hcl.Body, context *hcl.EvalContext, b Block) (diags hcl.Diagnostics) {
+	// Marked strings are unwrapped for Go string fields above. Other marked Go
+	// field types can still panic inside gohcl, so keep them as diagnostics.
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message, ok := recovered.(string)

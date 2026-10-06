@@ -131,8 +131,11 @@ func Int(i int) *int {
 }
 
 func CtyValueToString(val cty.Value) string {
-	if val.IsMarked() {
+	if val.HasMark(SensitiveMark) {
 		return "<sensitive>"
+	}
+	if val.IsMarked() {
+		val, _ = val.Unmark()
 	}
 	if val.IsNull() && val != cty.NilVal {
 		return "null"
