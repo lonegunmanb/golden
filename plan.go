@@ -16,7 +16,7 @@ func dagPlan(b Block) error {
 		return fmt.Errorf("%s(%s) Decode error: %+v", b.Address(), b.HclBlock().Range().String(), decodeErr)
 	}
 	if validateErr := Validate.Struct(b); validateErr != nil {
-		if marked, ok := b.(interface{ hasDecodedMarks() bool }); ok && marked.hasDecodedMarks() {
+		if marked, ok := b.(decodedMarkCarrier); ok && marked.hasSensitiveDecodedMarks() {
 			return fmt.Errorf("%s.%s.%s is not valid (sensitive value redacted)", b.BlockType(), b.Type(), b.Name())
 		}
 		return fmt.Errorf("%s.%s.%s is not valid: %s", b.BlockType(), b.Type(), b.Name(), validateErr.Error())

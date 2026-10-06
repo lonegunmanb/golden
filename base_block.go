@@ -12,6 +12,16 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+// SensitiveMark identifies values that should be redacted when Golden formats
+// them. Other cty marks are preserved but do not imply sensitivity.
+const SensitiveMark = "sensitive"
+
+type decodedMarkCarrier interface {
+	setDecodedMarks([]cty.PathValueMarks)
+	getDecodedMarks() []cty.PathValueMarks
+	hasSensitiveDecodedMarks() bool
+}
+
 type BaseBlock struct {
 	c             Config
 	hb            *HclBlock
@@ -86,13 +96,18 @@ func (bb *BaseBlock) getDecodedMarks() []cty.PathValueMarks {
 	return bb.decodedMarks
 }
 
-func (bb *BaseBlock) hasDecodedMarks() bool {
+func (bb *BaseBlock) hasSensitiveDecodedMarks() bool {
 	if bb == nil {
 		return false
 	}
 	bb.valueMu.RLock()
 	defer bb.valueMu.RUnlock()
-	return len(bb.decodedMarks) != 0
+	for _, marked := range bb.decodedMarks {
+		if _, sensitive := marked.Marks[SensitiveMark]; sensitive {
+			return true
+		}
+	}
+	return false
 }
 
 func (bb *BaseBlock) EvalContext() *hcl.EvalContext {

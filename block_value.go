@@ -34,7 +34,7 @@ func Value(b Block) map[string]cty.Value {
 		values[tagName] = ToCtyValue(fieldValue.Interface())
 	}
 
-	if marked, ok := b.(interface{ getDecodedMarks() []cty.PathValueMarks }); ok {
+	if marked, ok := b.(decodedMarkCarrier); ok {
 		for _, mark := range marked.getDecodedMarks() {
 			step, ok := mark.Path[0].(cty.GetAttrStep)
 			if !ok {
