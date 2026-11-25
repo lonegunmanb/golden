@@ -8,6 +8,8 @@ It supports two block interfaces: [`PlanBlock`](./plan_block.go) and [`ApplyBloc
 
 Golden has implemented `local` block.
 
+Golden has implemented `output` block with required `value`, optional `description` and `sensitive` attributes, `depends_on`, and `precondition`. Outputs are evaluated during plan and re-evaluated during apply so upstream unknown values resolve to concrete values. When `sensitive = true` the output value is marked with `golden.SensitiveMark` and redacted as `<sensitive>` by `CtyValueToString`; sensitivity already present on the value is preserved.
+
 Golden has implemented support for `for_each` and `precondition` in blocks.
 
 A simple example to show how to customize your own DSL is in our roadmap.

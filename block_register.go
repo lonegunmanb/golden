@@ -99,6 +99,7 @@ func lookupRefIterator(name string) (refIterator, bool) {
 func registerCommonBlock() {
 	RegisterBlock(new(LocalBlock))
 	RegisterBlock(new(VariableBlock))
+	RegisterBlock(new(OutputBlock))
 }
 
 var factories = map[string]blockRegistry{}

@@ -1,0 +1,180 @@
+package golden
+
+import (
+	"fmt"
+
+	"github.com/hashicorp/hcl/v2"
+	"github.com/zclconf/go-cty/cty"
+)
+
+var _ Output = &OutputBlock{}
+var _ PlanBlock = &OutputBlock{}
+var _ ApplyBlock = &OutputBlock{}
+var _ CustomDecode = &OutputBlock{}
+
+type Output interface {
+	SingleValueBlock
+	// discriminator func
+	Output()
+}
+
+type OutputBlock struct {
+	*BaseBlock
+	description *string
+	sensitive   bool
+	value       cty.Value
+}
+
+func (o *OutputBlock) Type() string {
+	return ""
+}
+
+func (o *OutputBlock) BlockType() string {
+	return "output"
+}
+
+func (o *OutputBlock) Output() {}
+
+func (o *OutputBlock) AddressLength() int { return 2 }
+
+func (o *OutputBlock) CanExecutePrePlan() bool {
+	return false
+}
+
+func (o *OutputBlock) Decode(_ *HclBlock, _ *hcl.EvalContext) error {
+	return nil
+}
+
+func (o *OutputBlock) ExecuteDuringPlan() error {
+	return o.evaluate()
+}
+
+func (o *OutputBlock) Apply() error {
+	return o.evaluate()
+}
+
+func (o *OutputBlock) Value() cty.Value {
+	o.rlockValue()
+	defer o.runlockValue()
+	if o.value == cty.NilVal {
+		return cty.DynamicVal
+	}
+	return o.value
+}
+
+func (o *OutputBlock) Description() *string {
+	o.rlockValue()
+	defer o.runlockValue()
+	return o.description
+}
+
+func (o *OutputBlock) Sensitive() bool {
+	o.rlockValue()
+	defer o.runlockValue()
+	return o.sensitive || (o.value != cty.NilVal && o.value.HasMarkDeep(SensitiveMark))
+}
+
+func (o *OutputBlock) ValueExprString() string {
+	attr, ok := o.HclBlock().Attributes()["value"]
+	if !ok {
+		return ""
+	}
+	return attr.ExprString()
+}
+
+func (o *OutputBlock) evaluate() error {
+	hb := o.HclBlock()
+	valueAttr, ok := hb.Body.Attributes["value"]
+	if !ok {
+		return fmt.Errorf("`value` is required for %s, %s", o.Address(), hb.Range().String())
+	}
+	if err := o.validateAttributes(hb); err != nil {
+		return err
+	}
+	description, err := o.parseDescription(hb)
+	if err != nil {
+		return err
+	}
+	sensitive, err := o.parseSensitive(hb)
+	if err != nil {
+		return err
+	}
+	value, diag := valueAttr.Expr.Value(o.EvalContext())
+	if diag.HasErrors() {
+		return diag
+	}
+	if sensitive {
+		value = value.Mark(SensitiveMark)
+	}
+	o.lockValue()
+	defer o.unlockValue()
+	o.description = description
+	o.sensitive = sensitive
+	o.value = value
+	return nil
+}
+
+func (o *OutputBlock) validateAttributes(hb *HclBlock) error {
+	schema := &hcl.BodySchema{
+		Attributes: []hcl.AttributeSchema{
+			{Name: "value", Required: true},
+			{Name: "description"},
+			{Name: "sensitive"},
+		},
+		Blocks: []hcl.BlockHeaderSchema{
+			{Type: "precondition"},
+			{Type: "dynamic", LabelNames: []string{"type"}},
+		},
+	}
+	for _, name := range MetaAttributeNames.Values() {
+		schema.Attributes = append(schema.Attributes, hcl.AttributeSchema{Name: name.(string)})
+	}
+	_, diag := hb.Body.Content(schema)
+	if diag.HasErrors() {
+		return diag
+	}
+	return nil
+}
+
+func (o *OutputBlock) parseDescription(hb *HclBlock) (*string, error) {
+	attr, ok := hb.Body.Attributes["description"]
+	if !ok {
+		return nil, nil
+	}
+	value, diag := attr.Expr.Value(o.EvalContext())
+	if diag.HasErrors() {
+		return nil, diag
+	}
+	if !value.IsKnown() {
+		return nil, fmt.Errorf("incorrect type for `description`, want %s, got unknown value, %s", cty.String.GoString(), attr.Range().String())
+	}
+	if value.IsNull() {
+		return nil, fmt.Errorf("incorrect type for `description`, want %s, got null, %s", cty.String.GoString(), attr.Range().String())
+	}
+	if value.Type() != cty.String {
+		return nil, fmt.Errorf("incorrect type for `description`, want %s, got %s, %s", cty.String.GoString(), value.Type().GoString(), attr.Range().String())
+	}
+	description := value.AsString()
+	return &description, nil
+}
+
+func (o *OutputBlock) parseSensitive(hb *HclBlock) (bool, error) {
+	attr, ok := hb.Body.Attributes["sensitive"]
+	if !ok {
+		return false, nil
+	}
+	value, diag := attr.Expr.Value(o.EvalContext())
+	if diag.HasErrors() {
+		return false, diag
+	}
+	if !value.IsKnown() {
+		return false, fmt.Errorf("incorrect type for `sensitive`, want %s, got unknown value, %s", cty.Bool.GoString(), attr.Range().String())
+	}
+	if value.IsNull() {
+		return false, fmt.Errorf("incorrect type for `sensitive`, want %s, got null, %s", cty.Bool.GoString(), attr.Range().String())
+	}
+	if value.Type() != cty.Bool {
+		return false, fmt.Errorf("incorrect type for `sensitive`, want %s, got %s, %s", cty.Bool.GoString(), value.Type().GoString(), attr.Range().String())
+	}
+	return value.True(), nil
+}

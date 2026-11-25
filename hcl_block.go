@@ -191,11 +191,11 @@ func (hb *HclBlock) expandDynamicBlocks(evalContext *hcl.EvalContext) (*HclBlock
 
 func readRawHclSyntaxBlock(b *hclsyntax.Block) []*hclsyntax.Block {
 	switch b.Type {
-	case "variable":
+	case "variable", "output":
 		{
 			return []*hclsyntax.Block{
 				{
-					Type:            "variable",
+					Type:            b.Type,
 					Labels:          append([]string{""}, b.Labels...),
 					Body:            b.Body,
 					TypeRange:       b.TypeRange,
