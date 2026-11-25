@@ -155,14 +155,20 @@ func NewBasicConfig(basedir, dslFullName, dslAbbreviation string, varConfigDir *
 }
 
 func (c *BaseConfig) RunPrePlan() error {
-	return c.d.runDagSerial(c, prePlan)
+	return c.d.runDagSerial(c, prePlan, false)
 }
 
 func (c *BaseConfig) RunPlan() error {
 	return c.runDag(dagPlan)
 }
 
+// RunApply visits blocks in dependency order. The caller decides which blocks
+// to apply in onReady. Calling Apply on ApplyBlocks also refreshes built-in
+// locals and outputs for their downstream consumers.
 func (c *BaseConfig) RunApply(onReady func(Block) error) error {
+	if c.parallelism == nil {
+		return c.d.runDagSerial(c, onReady, true)
+	}
 	return c.runDag(onReady)
 }
 
@@ -365,7 +371,7 @@ func (c *BaseConfig) runDag(onReady func(Block) error) error {
 	if c.parallelism != nil {
 		return c.d.runDagOnParallel(c, *c.parallelism, onReady)
 	}
-	return c.d.runDagSerial(c, onReady)
+	return c.d.runDagSerial(c, onReady, false)
 }
 
 func (c *BaseConfig) expandBlock(b Block) ([]Block, error) {

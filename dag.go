@@ -45,8 +45,13 @@ func (d *Dag) addEdge(from, to string) error {
 	return nil
 }
 
-func (d *Dag) runDagSerial(c Config, onReady func(Block) error) error {
+func (d *Dag) runDagSerial(c Config, onReady func(Block) error, waitForCurrentRun bool) error {
 	var err error
+	// During apply, ready-for-read can reflect plan rather than this walk.
+	var completed map[string]bool
+	if waitForCurrentRun {
+		completed = make(map[string]bool)
+	}
 	pending := linkedlistqueue.New()
 	var prePlanBlocks, otherBlocks []Block
 	for _, v := range d.GetRoots() {
@@ -66,8 +71,11 @@ func (d *Dag) runDagSerial(c Config, onReady func(Block) error) error {
 	for !pending.Empty() {
 		next, _ := pending.Dequeue()
 		b := next.(Block)
-		// the node has already been expandable and deleted from dag
 		address := b.Address()
+		if _, processed := completed[address]; processed {
+			continue
+		}
+		// the node has already been expandable and deleted from dag
 		exist := d.exist(address)
 		if !exist {
 			continue
@@ -82,7 +90,7 @@ func (d *Dag) runDagSerial(c Config, onReady func(Block) error) error {
 			if dagErr != nil {
 				return dagErr
 			}
-			if !v.(Block).isReadyForRead() {
+			if !v.(Block).isReadyForRead() || (waitForCurrentRun && !completed[upstreamAddress]) {
 				ready = false
 				break
 			}
@@ -112,7 +120,11 @@ func (d *Dag) runDagSerial(c Config, onReady func(Block) error) error {
 			pending = newPending
 			continue
 		}
-		if callbackErr := onReady(b); callbackErr != nil {
+		callbackErr := onReady(b)
+		if waitForCurrentRun {
+			completed[address] = callbackErr == nil
+		}
+		if callbackErr != nil {
 			err = multierror.Append(err, callbackErr)
 		}
 		// this address might be expandable during onReady and no more exist.

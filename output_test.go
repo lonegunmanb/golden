@@ -513,6 +513,62 @@ output "resolved" {
 	assert.True(t, AreCtyValuesEqual(cty.StringVal("applied"), output.Value()))
 }
 
+func TestOutputBlockResolvesApplyValuesThroughLocals(t *testing.T) {
+	testBase := newTestBase()
+	t.Cleanup(testBase.teardown)
+	testBase.dummyFsWithFiles(map[string]string{
+		"test.hcl": `
+res_unknown "unknown" this {}
+
+locals {
+  upstream = res_unknown.unknown.this.value
+  forwarded = local.upstream
+}
+
+output "resolved" {
+  value = "${local.forwarded}:${res_unknown.unknown.this.value}"
+}
+`,
+	})
+	RegisterBlock(new(UnknownApplyValueBlock))
+
+	for _, mode := range []string{"serial", "parallel"} {
+		t.Run(mode, func(t *testing.T) {
+			hclBlocks, err := loadHclBlocks(false, "")
+			require.NoError(t, err)
+			base := NewBasicConfig("/", "faketerraform", "ft", nil, nil, nil)
+			var c Config = base
+			if mode == "parallel" {
+				c = &parallelTestConfig{BaseConfig: base, parallelism: 2}
+			}
+			require.NoError(t, InitConfig(c, hclBlocks))
+			require.NoError(t, c.RunPlan())
+
+			outputs := Blocks[*OutputBlock](c)
+			require.Len(t, outputs, 1)
+			output := outputs[0]
+			require.False(t, output.Value().IsKnown())
+			require.True(t, output.Value().Type().Equals(cty.String))
+
+			var evaluations atomic.Int32
+			require.NoError(t, c.RunApply(func(b Block) error {
+				if applyBlock, ok := b.(ApplyBlock); ok {
+					if err := applyBlock.Apply(); err != nil {
+						return err
+					}
+					if b == output {
+						evaluations.Add(1)
+						assert.True(t, output.Value().RawEquals(cty.StringVal("applied:applied")),
+							"output must read the refreshed local when its callback runs")
+					}
+				}
+				return nil
+			}))
+			assert.EqualValues(t, 1, evaluations.Load())
+		})
+	}
+}
+
 func TestOutputBlockParallelDAG(t *testing.T) {
 	testBase := newTestBase()
 	defer testBase.teardown()

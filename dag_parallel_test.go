@@ -372,6 +372,26 @@ func TestRunApplyWithoutParallelismRemainsSerial(t *testing.T) {
 	assert.Equal(t, int32(1), maximum.Load())
 }
 
+func TestRunApplySerialBlocksFailedDescendants(t *testing.T) {
+	c := NewBasicConfig("", "test", "test", nil, nil, nil)
+	for _, address := range []string{"failed", "blocked", "independent"} {
+		addParallelTestBlock(t, c.d, address, true)
+	}
+	require.NoError(t, c.d.AddEdge("failed", "blocked"))
+	require.NoError(t, c.d.AddEdge("independent", "blocked"))
+
+	var called []string
+	err := c.RunApply(func(b Block) error {
+		called = append(called, b.Address())
+		if b.Address() == "failed" {
+			return errors.New("apply failed")
+		}
+		return nil
+	})
+	require.ErrorContains(t, err, "apply failed")
+	assert.ElementsMatch(t, []string{"failed", "independent"}, called)
+}
+
 func TestRunApplyCanSkipUnselectedBlocks(t *testing.T) {
 	d := newDag()
 	for _, address := range []string{"unselected", "selected"} {

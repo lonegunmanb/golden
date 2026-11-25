@@ -7,6 +7,7 @@ import (
 var _ Local = &LocalBlock{}
 var _ PlanBlock = &LocalBlock{}
 var _ PrePlanBlock = &LocalBlock{}
+var _ ApplyBlock = &LocalBlock{}
 
 type Local interface {
 	SingleValueBlock
@@ -32,6 +33,11 @@ func (l *LocalBlock) CanExecutePrePlan() bool {
 }
 
 func (l *LocalBlock) ExecuteDuringPlan() error {
+	return l.parseValue()
+}
+
+// Apply refreshes the local value using the applied values of its dependencies.
+func (l *LocalBlock) Apply() error {
 	return l.parseValue()
 }
 
