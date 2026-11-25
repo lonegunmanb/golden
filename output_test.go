@@ -145,6 +145,72 @@ output "plain" {
 	assert.Nil(s.T(), byName["plain"].Description())
 }
 
+func (s *outputSuite) TestMarkedDescriptionIsRejected() {
+	s.dummyFsWithFiles(map[string]string{
+		"test.hcl": `
+marked_data "marked" source {
+}
+
+output "described" {
+  value       = "hello"
+  description = marked_data.marked.source.value
+}
+`,
+	})
+	RegisterBlock(new(SensitiveMarkedDataBlock))
+	c, err := BuildDummyConfig("/", "", nil, nil)
+	require.NoError(s.T(), err)
+	_, err = RunDummyPlan(c)
+	require.Error(s.T(), err)
+	assert.Contains(s.T(), err.Error(), "`description` must not be a marked value")
+}
+
+func (s *outputSuite) TestMarkedSensitiveFlagIsUnmarkedBeforeConversion() {
+	s.dummyFsWithFiles(map[string]string{
+		"test.hcl": `
+marked_bool "flag" source {
+}
+
+output "guarded" {
+  value     = "hello"
+  sensitive = marked_bool.flag.source.value
+}
+`,
+	})
+	RegisterBlock(new(MarkedBoolDataBlock))
+	c, err := BuildDummyConfig("/", "", nil, nil)
+	require.NoError(s.T(), err)
+	_, err = RunDummyPlan(c)
+	require.NoError(s.T(), err)
+
+	output := s.onlyOutput(c)
+	assert.True(s.T(), output.Sensitive())
+	assert.True(s.T(), output.Value().HasMark(SensitiveMark))
+	assert.Equal(s.T(), "<sensitive>", CtyValueToString(output.Value()))
+}
+
+func (s *outputSuite) TestDynamicPreconditionIsExpandedAndChecked() {
+	c := s.buildConfig(`
+locals {
+  checks = [{ pass = true }, { pass = false }]
+}
+
+output "result" {
+  value = "hello"
+  dynamic "precondition" {
+    for_each = local.checks
+    content {
+      condition     = precondition.value.pass
+      error_message = "generated precondition must pass"
+    }
+  }
+}
+`)
+	_, err := RunDummyPlan(c)
+	require.Error(s.T(), err)
+	assert.Contains(s.T(), err.Error(), "generated precondition must pass")
+}
+
 func (s *outputSuite) TestOutputBlockRejectsInvalidDescriptionAndSensitive() {
 	cases := []struct {
 		desc      string
@@ -519,6 +585,39 @@ func (m *SensitiveMarkedDataBlock) BaseValues() map[string]cty.Value {
 	return values
 }
 
+var _ PlanBlock = &MarkedBoolDataBlock{}
+var _ CustomDecode = &MarkedBoolDataBlock{}
+
+// MarkedBoolDataBlock simulates a block producing a known boolean value
+// carrying SensitiveMark.
+type MarkedBoolDataBlock struct {
+	*BaseBlock
+}
+
+func (m *MarkedBoolDataBlock) Decode(_ *HclBlock, _ *hcl.EvalContext) error {
+	return nil
+}
+
+func (m *MarkedBoolDataBlock) Type() string {
+	return "flag"
+}
+
+func (m *MarkedBoolDataBlock) BlockType() string {
+	return "marked_bool"
+}
+
+func (m *MarkedBoolDataBlock) AddressLength() int { return 3 }
+
+func (m *MarkedBoolDataBlock) CanExecutePrePlan() bool { return false }
+
+func (m *MarkedBoolDataBlock) ExecuteDuringPlan() error { return nil }
+
+func (m *MarkedBoolDataBlock) BaseValues() map[string]cty.Value {
+	values := m.BaseBlock.BaseValues()
+	values["value"] = cty.BoolVal(true).Mark(SensitiveMark)
+	return values
+}
+
 var _ PlanBlock = &UnknownApplyValueBlock{}
 var _ ApplyBlock = &UnknownApplyValueBlock{}
 var _ CustomDecode = &UnknownApplyValueBlock{}
@@ -542,7 +641,7 @@ func (u *UnknownApplyValueBlock) BlockType() string {
 	return "res_unknown"
 }
 
-func (u *UnknownApplyValueBlock) AddressLength() int { return 2 }
+func (u *UnknownApplyValueBlock) AddressLength() int { return 3 }
 
 func (u *UnknownApplyValueBlock) CanExecutePrePlan() bool { return false }
 
